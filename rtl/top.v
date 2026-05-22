@@ -76,17 +76,17 @@ module top (
     );
 
     // ---------------- Sprite position ----------------
-    localparam [9:0] SPRITE_W = 10'd32;
-    localparam [9:0] SPRITE_H = 10'd32;
+    localparam [9:0] SPRITE_W = 10'd64;
+    localparam [9:0] SPRITE_H = 10'd64;
     localparam [9:0] STEP     = 10'd2;          // pixels per frame while held
     localparam [9:0] X_MAX    = 10'd480 - SPRITE_W;
-    localparam [9:0] Y_FIXED  = 10'd120;
+    localparam [9:0] Y_FIXED  = 10'd104;        // 272/2 - 64/2
 
     reg [9:0] sprite_x;
 
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
-            sprite_x <= 10'd224;  // ~centered (480/2 - 32/2)
+            sprite_x <= 10'd208;  // centered (480/2 - 64/2)
         end else if (frame_tick) begin
             if (btn_l_pressed && !btn_r_pressed) begin
                 sprite_x <= (sprite_x > STEP) ? sprite_x - STEP : 10'd0;
