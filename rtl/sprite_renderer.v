@@ -39,21 +39,26 @@
 module sprite_renderer #(
     parameter [9:0]  W                 = 10'd64,   // sprite width
     parameter [9:0]  H                 = 10'd64,   // sprite height
+    parameter        NUM_FRAMES        = 4,        // number of animation frames in ROM
+    parameter        FRAME_BITS        = 2,        // = $clog2(NUM_FRAMES)
     parameter [15:0] TRANSPARENT_COLOR = 16'hF81F  // RGB565 pure magenta
 ) (
-    input  wire        pclk,
-    input  wire [9:0]  px,         // current screen pixel x
-    input  wire [9:0]  py,         // current screen pixel y
-    input  wire [9:0]  sprite_x,   // sprite's top-left x on the screen
-    input  wire [9:0]  sprite_y,   // sprite's top-left y on the screen
-    output wire        in_sprite,  // 1 if pixel is inside sprite AND not transparent
-    output wire [4:0]  r,
-    output wire [5:0]  g,
-    output wire [4:0]  b
+    input  wire                   pclk,
+    input  wire [9:0]             px,           // current screen pixel x
+    input  wire [9:0]             py,           // current screen pixel y
+    input  wire [9:0]             sprite_x,     // sprite's top-left x on the screen
+    input  wire [9:0]             sprite_y,     // sprite's top-left y on the screen
+    input  wire [FRAME_BITS-1:0]  frame_index,  // which animation frame to show
+    output wire                   in_sprite,    // 1 if pixel is inside sprite AND not transparent
+    output wire [4:0]             r,
+    output wire [5:0]             g,
+    output wire [4:0]             b
 );
 
-    // ----- The sprite ROM: 4096 entries (64x64) x 16 bits per pixel -----
-    reg [15:0] mem [0:4095];
+    // ----- The sprite ROM: NUM_FRAMES * 4096 entries (64x64 each), 16 bits per pixel -----
+    // Frames are laid out one after another: frame 0 at addrs [0..4095],
+    // frame 1 at [4096..8191], etc. png_to_mem.py concatenates them in order.
+    reg [15:0] mem [0:NUM_FRAMES*4096 - 1];
     initial $readmemh("rtl/sprite.mem", mem);
 
     // ----- Bounding box test (in screen coordinates) -----
@@ -68,8 +73,8 @@ module sprite_renderer #(
     wire [5:0] lx = lx_full[5:0];
     wire [5:0] ly = ly_full[5:0];
 
-    // The address into the ROM: row * 64 + column, packed as {ly, lx}.
-    wire [11:0] addr = {ly, lx};
+    // The address into the ROM: {frame, row, column}. Total width = FRAME_BITS + 12.
+    wire [FRAME_BITS+11:0] addr = {frame_index, ly, lx};
 
     // ----- Synchronous BRAM read (this is the 1-cycle delay) -----
     // pixel_q  = the RGB565 color sitting at this address

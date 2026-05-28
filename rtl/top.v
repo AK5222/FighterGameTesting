@@ -154,12 +154,23 @@ module top (
     reg        jumping;
     reg [5:0]  jump_cnt;   // counts frames into the jump
 
+    // Walk-cycle animation: advance frame_index every ANIM_DIV frame_ticks
+    // while a movement button is held. Idle = held at 0 (idle pose).
+    // 4 frames: 0=idle, 1=contact, 2=passing, 3=contact (other leg).
+    localparam [3:0] ANIM_DIV   = 4'd7;
+    localparam [1:0] LAST_FRAME = 2'd3;   // highest valid frame index
+    reg [3:0] anim_cnt;
+    reg [1:0] frame_index;
+    wire moving = btn_l_pressed ^ btn_r_pressed;   // exactly one direction held
+
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
-            sprite_x <= 10'd208;
-            sprite_y <= Y_GROUND;
-            jumping  <= 1'b0;
-            jump_cnt <= 6'd0;
+            sprite_x    <= 10'd208;
+            sprite_y    <= Y_GROUND;
+            jumping     <= 1'b0;
+            jump_cnt    <= 6'd0;
+            anim_cnt    <= ANIM_DIV;
+            frame_index <= 2'd0;
         end else if (frame_tick) begin
 
             // --- Horizontal movement (always allowed) ---
@@ -170,6 +181,21 @@ module top (
                 sprite_x <= (sprite_x < X_MAX - STEP) ? sprite_x + STEP : X_MAX;
             end
             // If both or neither held: stay put
+
+            // --- Walk animation ---
+            if (!moving) begin
+                // Idle: freeze on frame 0 (idle pose). Pre-load the divider
+                // to ANIM_DIV so the very first frame_tick after a button is
+                // pressed advances straight to frame 1 (no wait-then-walk).
+                anim_cnt    <= ANIM_DIV;
+                frame_index <= 2'd0;
+            end else if (anim_cnt == ANIM_DIV) begin
+                anim_cnt    <= 4'd0;
+                frame_index <= (frame_index == LAST_FRAME) ? 2'd0
+                                                           : frame_index + 1'b1;
+            end else begin
+                anim_cnt <= anim_cnt + 1'b1;
+            end
 
             // --- Jump state machine ---
             if (!jumping) begin
@@ -210,18 +236,21 @@ module top (
     wire [4:0] sp_b;
 
     sprite_renderer #(
-        .W (SPRITE_W),
-        .H (SPRITE_H)
+        .W          (SPRITE_W),
+        .H          (SPRITE_H),
+        .NUM_FRAMES (4),
+        .FRAME_BITS (2)
     ) u_sprite (
-        .pclk      (pclk),
-        .px        (px),
-        .py        (py),
-        .sprite_x  (sprite_x),
-        .sprite_y  (sprite_y),
-        .in_sprite (sp_in),
-        .r         (sp_r),
-        .g         (sp_g),
-        .b         (sp_b)
+        .pclk        (pclk),
+        .px          (px),
+        .py          (py),
+        .sprite_x    (sprite_x),
+        .sprite_y    (sprite_y),
+        .frame_index (frame_index),
+        .in_sprite   (sp_in),
+        .r           (sp_r),
+        .g           (sp_g),
+        .b           (sp_b)
     );
 
     // =========================================================================
