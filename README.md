@@ -2,8 +2,9 @@
 
 An FPGA project that drives a 4.3" 480×272 TFT LCD and displays a movable 64×64 sprite loaded from a PNG. Built as a starting point for a Street Fighter–style game on real hardware.
 
-**Hardware:** ICESugar-Pro (Lattice ECP5), 4.3" RGB TFT LCD (480×272), 2× pushbuttons on pins A8 / A7.
-
+**Hardware:** 
+Screen: 4.3 inch TFT LCD display touch screen RGB 40PIN 480X272 800X480 (No touch 480X272)  
+FPGA: ICESugar-pro
 ---
 
 ## How it works
@@ -45,7 +46,7 @@ Magenta (RGB565 `0xF81F`) is the transparent color — any magenta pixel in the 
 Paste this one-liner in PowerShell from the project folder:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass -Force; . "C:\oss-cad-suite\oss-cad-suite\environment.ps1"; mkdir build -ErrorAction SilentlyContinue; yosys -p "synth_ecp5 -top top -json build/top.json" rtl/pll.v rtl/lcd_timing.v rtl/sprite_renderer.v rtl/debounce.v rtl/top.v; nextpnr-ecp5 --25k --package CABGA256 --speed 6 --json build/top.json --textcfg build/top.cfg --lpf top.lpf --freq 25; ecppack --svf build/top.svf build/top.cfg build/top.bit
+Set-ExecutionPolicy -Scope Process Bypass -Force; . "C:\oss-cad-suite\oss-cad-suite\environment.ps1"; mkdir build -ErrorAction SilentlyContinue; yosys -p "synth_ecp5 -top top -json build/top.json" rtl/pll.v rtl/lcd_timing.v rtl/sprite_renderer.v rtl/bg_renderer.v rtl/debounce.v rtl/top.v; nextpnr-ecp5 --25k --package CABGA256 --speed 6 --json build/top.json --textcfg build/top.cfg --lpf top.lpf --freq 25; ecppack --svf build/top.svf build/top.cfg build/top.bit
 ```
 
 Then drag `build/top.bit` onto the iCELink USB drive that appears when the board is plugged in.

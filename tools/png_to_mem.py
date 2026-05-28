@@ -172,22 +172,75 @@ def write_pixel(f, r, g, b):
     f.write(f"{rgb565:04X}\n")
 
 
+def write_bg(src, dst, bw, bh):
+    """Background mode: resize one PNG to (bw, bh), write as packed RGB565.
+    No transparency key (every pixel is opaque). Also detects the grass-line y
+    so the caller knows what Y_GROUND to set in top.v."""
+    print(f"background: {src} -> {bw}x{bh}")
+    rgb, _ = load_image(src)
+    rgb = rgb.resize((bw, bh), Image.NEAREST)
+
+    with open(dst, "w") as f:
+        f.write(f"// background {bw}x{bh} RGB565, from {src}\n")
+        for y in range(bh):
+            for x in range(bw):
+                r, g, b = rgb.getpixel((x, y))
+                rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+                f.write(f"{rgb565:04X}\n")
+
+    # Find the topmost row that is mostly grass-green -- that's the flat
+    # horizon line the sprite should stand on.
+    px = rgb.load()
+    for y in range(bh):
+        green = sum(1 for x in range(bw)
+                    if (px[x, y][1] > px[x, y][0]
+                        and px[x, y][1] > px[x, y][2]
+                        and px[x, y][1] > 100
+                        and px[x, y][0] < 200))
+        if green > bw * 0.5:
+            # Screen height is 272. Scale factor = 272 // bh (assumes the
+            # bg_renderer uses px>>shift, py>>shift to map screen->bg coords).
+            scale = 272 // bh
+            screen_y = y * scale
+            print(f"wrote {bw*bh} pixels to {dst}")
+            print(f"detected grass-line at bg y={y} -> screen y={screen_y} "
+                  f"(assuming {scale}x scaling)")
+            print(f"  -> set Y_GROUND = {screen_y - 64} in rtl/top.v "
+                  f"(sprite bottom lands on grass)")
+            return
+    print(f"wrote {bw*bh} pixels to {dst}")
+    print("note: no obvious grass line detected; tweak Y_GROUND by hand")
+
+
 def main():
-    # Parse optional --size N flag out of argv (any position).
+    # Parse optional flags out of argv (any position).
     args = sys.argv[1:]
     size = 64
+    bg_dims = None
+
     if "--size" in args:
         i = args.index("--size")
         size = int(args[i + 1])
         del args[i:i+2]
 
+    if "--bg" in args:
+        i = args.index("--bg")
+        bg_dims = tuple(int(v) for v in args[i + 1].lower().split("x"))
+        del args[i:i+2]
+
     if len(args) < 2:
-        print("usage: png_to_mem.py <input1.png> [input2.png ...] <output.mem> [--size N]")
+        print("usage: png_to_mem.py <input1.png> [input2.png ...] <output.mem> "
+              "[--size N] [--bg WxH]")
         sys.exit(1)
 
     inputs = args[:-1]
     dst    = args[-1]
     n      = len(inputs)
+
+    if bg_dims is not None:
+        bw, bh = bg_dims
+        write_bg(inputs[0], dst, bw, bh)
+        return
 
     frames = load_frames(inputs, size)
 

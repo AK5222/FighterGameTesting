@@ -164,7 +164,7 @@ module top (
     localparam [9:0] SPRITE_H  = 10'd64;
     localparam [9:0] STEP      = 10'd2;         // pixels per frame while held
     localparam [9:0] X_MAX     = 10'd480 - SPRITE_W;
-    localparam [9:0] Y_GROUND  = 10'd140;       // resting Y (lower half of 272-pixel screen)
+    localparam [9:0] Y_GROUND  = 10'd124;       // sprite bottom lands on grass line (screen y=188)
 
     // Jump parameters
     // JUMP_RISE + JUMP_FALL frames total arc. JUMP_HEIGHT in pixels.
@@ -364,6 +364,19 @@ module top (
         .b           (opp_b)
     );
 
+    // ---- Background renderer (240x136 pixel-doubled to 480x272) ----
+    wire [4:0] bg_r;
+    wire [5:0] bg_g;
+    wire [4:0] bg_b;
+    bg_renderer u_bg (
+        .pclk (pclk),
+        .px   (px),
+        .py   (py),
+        .r    (bg_r),
+        .g    (bg_g),
+        .b    (bg_b)
+    );
+
     // =========================================================================
     // 7) PIXEL MUX -- player > opponent > background priority
     // =========================================================================
@@ -377,11 +390,6 @@ module top (
     always @(posedge pclk) begin
         den_d <= den;
     end
-
-    // Background color = dark navy blue. Free to tweak.
-    localparam [4:0] BG_R = 5'h02;
-    localparam [5:0] BG_G = 6'h04;
-    localparam [4:0] BG_B = 5'h0A;
 
     reg [4:0] r_out;
     reg [5:0] g_out;
@@ -401,9 +409,9 @@ module top (
             g_out <= opp_g;
             b_out <= opp_b;
         end else begin
-            r_out <= BG_R;
-            g_out <= BG_G;
-            b_out <= BG_B;
+            r_out <= bg_r;
+            g_out <= bg_g;
+            b_out <= bg_b;
         end
     end
 
