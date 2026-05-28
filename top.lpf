@@ -1,17 +1,43 @@
+# =============================================================================
+# top.lpf -- pin assignment file (Lattice Preference File)
+# =============================================================================
+#
+# This file tells the build tools WHICH physical pins on the FPGA chip
+# correspond to WHICH signal names in our Verilog. Without this, the tools
+# would have no idea which metal leg on the chip is the LCD clock, vs which
+# is a button, vs which is the crystal oscillator.
+#
+# Syntax:
+#   LOCATE COMP "<verilog_name>"  SITE "<pin>";   -- pin assignment
+#   IOBUF  PORT "<verilog_name>"  <attributes>;   -- electrical settings
+#
+# Attributes used:
+#   IO_TYPE=LVCMOS33  -- 3.3 V logic levels
+#   DRIVE=4           -- output current strength (mA)
+#   PULLMODE=UP       -- enable internal pull-up resistor on input pins
+#
+# BLOCK statements at the top tell the timing tools to ignore certain paths
+# (the reset network and async inputs). Without them, the tool would
+# complain about "unconstrained paths" everywhere.
+# =============================================================================
+
 #P6 in FPGA
 
 BLOCK RESETPATHS;
 BLOCK ASYNCPATHS;
 
+# ---- System clock: 25 MHz crystal oscillator on the board ----
 LOCATE      COMP "CLK"    SITE "P6";
 IOBUF       PORT "CLK"    IO_TYPE=LVCMOS33;
 FREQUENCY   PORT "CLK"    25 MHZ;
 
+# ---- LCD timing signals ----
 LOCATE COMP "LCD_CLK" SITE "J13";
 IOBUF PORT "LCD_CLK" DRIVE=4 IO_TYPE=LVCMOS33;
 LOCATE COMP "LCD_DEN" SITE "F13";
 IOBUF PORT "LCD_DEN" DRIVE=4 IO_TYPE=LVCMOS33;
 
+# ---- LCD red channel (5 bits) ----
 LOCATE COMP "LCD_R[0]" SITE "P11";
 IOBUF PORT "LCD_R[0]" DRIVE=4 IO_TYPE=LVCMOS33;
 LOCATE COMP "LCD_R[1]" SITE "N12";
@@ -23,6 +49,7 @@ IOBUF PORT "LCD_R[3]" DRIVE=4 IO_TYPE=LVCMOS33;
 LOCATE COMP "LCD_R[4]" SITE "L14";
 IOBUF PORT "LCD_R[4]" DRIVE=4 IO_TYPE=LVCMOS33;
 
+# ---- LCD green channel (6 bits -- one more than R/B for human eye sensitivity) ----
 LOCATE COMP "LCD_G[0]" SITE "P12";
 IOBUF PORT "LCD_G[0]" DRIVE=4 IO_TYPE=LVCMOS33;
 LOCATE COMP "LCD_G[1]" SITE "P13";
@@ -36,6 +63,7 @@ IOBUF PORT "LCD_G[4]" DRIVE=4 IO_TYPE=LVCMOS33;
 LOCATE COMP "LCD_G[5]" SITE "K13";
 IOBUF PORT "LCD_G[5]" DRIVE=4 IO_TYPE=LVCMOS33;
 
+# ---- LCD blue channel (5 bits) ----
 LOCATE COMP "LCD_B[0]" SITE "K14";
 IOBUF PORT "LCD_B[0]" DRIVE=4 IO_TYPE=LVCMOS33;
 LOCATE COMP "LCD_B[1]" SITE "J14";
@@ -47,7 +75,10 @@ IOBUF PORT "LCD_B[3]" DRIVE=4 IO_TYPE=LVCMOS33;
 LOCATE COMP "LCD_B[4]" SITE "F14";
 IOBUF PORT "LCD_B[4]" DRIVE=4 IO_TYPE=LVCMOS33;
 
-# Breadboard buttons (active-low: pressed = pin tied to GND)
+# ---- Breadboard buttons (active-low: pressed = pin tied to GND) ----
+# PULLMODE=UP enables an internal pull-up resistor inside the FPGA so the pin
+# sits at 3.3V when the button is not pressed. Wire each button between the
+# pin (A8 or A7) and GND. No external resistor needed.
 LOCATE COMP "BTN_L" SITE "A8";
 IOBUF PORT "BTN_L" PULLMODE=UP IO_TYPE=LVCMOS33;
 LOCATE COMP "BTN_R" SITE "A7";
