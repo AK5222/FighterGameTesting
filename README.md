@@ -105,6 +105,8 @@ Buttons wire the same way: one leg to the FPGA pin, the other to GND. No resisto
 | Health bar size | `BAR_W` / `BAR_H` in `rtl/top.v` (default 144×12) |
 | Attack windup / swing length | `ATTACK_WINDUP_TICKS` / `ATTACK_SWING_TICKS` in `rtl/top.v` (frame_ticks, default 10 each ≈ 0.18 s) |
 | Damage per hit | `HIT_DAMAGE` in `rtl/top.v` (default 10 → ~14 hits to KO with BAR_W=144) |
+| Hitbox width | `HITBOX_INSET_X` in `rtl/top.v` (pixels shaved off each side; default 16 → 32-px effective hitbox out of 64-px sprite. Larger = tighter, smaller = wider) |
+| Hitbox height | `HITBOX_INSET_Y` in `rtl/top.v` (default 0; same idea as X but for vertical) |
 | Transparent color | `TRANSPARENT_COLOR` in `rtl/sprite_renderer.v` |
 | Button debounce time | `COUNT_MAX` in `rtl/debounce.v` (cycles at 9 MHz, default 90000 ≈ 10 ms) |
 

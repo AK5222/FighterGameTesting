@@ -197,6 +197,14 @@ module top (
     localparam [5:0] ATTACK_SWING_TICKS  = 6'd10;   // ~0.18 s of swing pose  (frame 5)
     localparam [9:0] HIT_DAMAGE          = 10'd10;  // HP lost per landed hit
 
+    // Hitbox inset: shrink the overlap test by this many pixels on each side
+    // of the sprite, so only the character's body (not the transparent
+    // padding around it) counts as a hit. Effective hitbox width is
+    // SPRITE_W - 2*HITBOX_INSET_X. Smaller value = wider hitbox (easier
+    // hits); larger value = tighter hitbox (must be closer to connect).
+    localparam [9:0] HITBOX_INSET_X = 10'd12;       // 64 - 2*16 = 32 px effective width
+    localparam [9:0] HITBOX_INSET_Y = 10'd0;        // vertical untouched for now
+
     // ---- HUD: health bars (drawn procedurally, no BRAM cost) ----
     localparam [9:0] BAR_W   = 10'd144;          // bar width = max HP, 1 pixel per HP
     localparam [9:0] BAR_H   = 10'd12;
@@ -447,9 +455,22 @@ module top (
     // =========================================================================
     // 6) HIT DETECTION -- bounding-box overlap + landing-hit flags
     // =========================================================================
-    // Sprite boxes overlap if both X and Y axes overlap.
-    wire boxes_overlap = (sprite_x <  opp_x + SPRITE_W) && (sprite_x + SPRITE_W >  opp_x)
-                      && (sprite_y <  opp_y + SPRITE_H) && (sprite_y + SPRITE_H >  opp_y);
+    // Effective hitbox edges (inset from the full sprite by HITBOX_INSET_*).
+    // Each character's hitbox is a rectangle centered inside their 64x64
+    // sprite, narrower than the sprite art so the transparent padding
+    // around the knight doesn't count as a hit.
+    wire [9:0] p_left   = sprite_x + HITBOX_INSET_X;
+    wire [9:0] p_right  = sprite_x + SPRITE_W - HITBOX_INSET_X;
+    wire [9:0] p_top    = sprite_y + HITBOX_INSET_Y;
+    wire [9:0] p_bottom = sprite_y + SPRITE_H - HITBOX_INSET_Y;
+    wire [9:0] o_left   = opp_x    + HITBOX_INSET_X;
+    wire [9:0] o_right  = opp_x    + SPRITE_W - HITBOX_INSET_X;
+    wire [9:0] o_top    = opp_y    + HITBOX_INSET_Y;
+    wire [9:0] o_bottom = opp_y    + SPRITE_H - HITBOX_INSET_Y;
+
+    // Hitboxes overlap if both X and Y ranges overlap.
+    wire boxes_overlap = (p_left < o_right) && (p_right > o_left)
+                      && (p_top  < o_bottom) && (p_bottom > o_top);
 
     // "Landing a hit" = attacker is in the swing phase, boxes overlap, and
     // we haven't already taken HP off the defender this attack.
