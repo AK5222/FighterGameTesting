@@ -172,6 +172,24 @@ module top (
     localparam [5:0] JUMP_FALL   = 6'd20;       // frames coming down
     localparam [9:0] JUMP_HEIGHT = 10'd80;      // max pixels above ground
 
+    // ---- HUD: health bars (drawn procedurally, no BRAM cost) ----
+    localparam [9:0] BAR_W   = 10'd144;          // bar width = max HP, 1 pixel per HP
+    localparam [9:0] BAR_H   = 10'd12;
+    localparam [9:0] P_BAR_X = 10'd8;            // player bar: top-left corner
+    localparam [9:0] P_BAR_Y = 10'd8;
+    localparam [9:0] O_BAR_X = 10'd480 - 10'd8 - BAR_W;  // opponent bar: top-right (= 328)
+    localparam [9:0] O_BAR_Y = 10'd8;
+
+    reg [9:0] player_hp;   // 0..BAR_W
+    reg [9:0] opp_hp;
+    // TODO: wire hp decrement to hit detection later. For now, both stay full.
+    always @(posedge pclk or negedge rst_n) begin
+        if (!rst_n) begin
+            player_hp <= BAR_W;
+            opp_hp    <= BAR_W;
+        end
+    end
+
     reg [9:0] sprite_x;
     reg [9:0] sprite_y;
 
@@ -378,14 +396,48 @@ module top (
     );
 
     // =========================================================================
-    // 7) PIXEL MUX -- player > opponent > background priority
+    // 7) HUD -- procedurally-drawn health bars (top-left + top-right corners)
+    // =========================================================================
+    // Bounding box + fill tests (combinational on px/py).
+    wire in_p_bar = (px >= P_BAR_X) && (px < P_BAR_X + BAR_W)
+                 && (py >= P_BAR_Y) && (py < P_BAR_Y + BAR_H);
+    wire in_o_bar = (px >= O_BAR_X) && (px < O_BAR_X + BAR_W)
+                 && (py >= O_BAR_Y) && (py < O_BAR_Y + BAR_H);
+
+    // 1-pixel white border around each bar
+    wire p_border = in_p_bar && (px == P_BAR_X || px == P_BAR_X + BAR_W - 1
+                              || py == P_BAR_Y || py == P_BAR_Y + BAR_H - 1);
+    wire o_border = in_o_bar && (px == O_BAR_X || px == O_BAR_X + BAR_W - 1
+                              || py == O_BAR_Y || py == O_BAR_Y + BAR_H - 1);
+
+    // Filled portion: player fills left-to-right, opponent fills right-to-left
+    wire p_filled = (px - P_BAR_X) < player_hp;
+    wire o_filled = (px - O_BAR_X) >= (BAR_W - opp_hp);
+
+    // Register flags 1 cycle to align with sprite/bg renderers' BRAM latency.
+    reg in_p_bar_q, in_o_bar_q, p_border_q, o_border_q, p_filled_q, o_filled_q;
+    always @(posedge pclk) begin
+        in_p_bar_q <= in_p_bar;
+        in_o_bar_q <= in_o_bar;
+        p_border_q <= p_border;
+        o_border_q <= o_border;
+        p_filled_q <= p_filled;
+        o_filled_q <= o_filled;
+    end
+
+    // HUD colors (RGB565 component widths)
+    localparam [4:0] BORDER_R   = 5'd31, HP_FILL_R  = 5'd0,  HP_EMPTY_R = 5'd5;
+    localparam [5:0] BORDER_G   = 6'd63, HP_FILL_G  = 6'd56, HP_EMPTY_G = 6'd5;
+    localparam [4:0] BORDER_B   = 5'd31, HP_FILL_B  = 5'd0,  HP_EMPTY_B = 5'd5;
+
+    // =========================================================================
+    // 8) PIXEL MUX -- HUD > player > opponent > background priority
     // =========================================================================
 
     // The sprite_renderer has 1 cycle of internal delay (it reads its ROM
     // synchronously). To keep den lined up with the sprite's RGB output, we
     // delay den by one cycle too. Otherwise the right edge of the sprite
     // would smear by one pixel.
-    // ---------------- Pixel mux ----------------
     reg den_d;
     always @(posedge pclk) begin
         den_d <= den;
@@ -400,7 +452,19 @@ module top (
         // While reset is asserted, force DEN low so the panel ignores us.
         den_out <= den_d & rst_n;
 
-        if (sp_in) begin
+        if (p_border_q || o_border_q) begin
+            r_out <= BORDER_R;
+            g_out <= BORDER_G;
+            b_out <= BORDER_B;
+        end else if (in_p_bar_q) begin
+            r_out <= p_filled_q ? HP_FILL_R : HP_EMPTY_R;
+            g_out <= p_filled_q ? HP_FILL_G : HP_EMPTY_G;
+            b_out <= p_filled_q ? HP_FILL_B : HP_EMPTY_B;
+        end else if (in_o_bar_q) begin
+            r_out <= o_filled_q ? HP_FILL_R : HP_EMPTY_R;
+            g_out <= o_filled_q ? HP_FILL_G : HP_EMPTY_G;
+            b_out <= o_filled_q ? HP_FILL_B : HP_EMPTY_B;
+        end else if (sp_in) begin
             r_out <= sp_r;
             g_out <= sp_g;
             b_out <= sp_b;

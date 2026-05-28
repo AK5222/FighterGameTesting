@@ -41,26 +41,16 @@ Magenta (RGB565 `0xF81F`) is the transparent color — any magenta pixel in the 
 
 ---
 
-## Build & flash (Windows)
+## Build
 
-Paste this one-liner in PowerShell from the project folder:
-
-```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force; . "C:\oss-cad-suite\oss-cad-suite\environment.ps1"; mkdir build -ErrorAction SilentlyContinue; yosys -p "synth_ecp5 -top top -json build/top.json" rtl/pll.v rtl/lcd_timing.v rtl/sprite_renderer.v rtl/bg_renderer.v rtl/debounce.v rtl/top.v; nextpnr-ecp5 --25k --package CABGA256 --speed 6 --json build/top.json --textcfg build/top.cfg --lpf top.lpf --freq 25; ecppack --svf build/top.svf build/top.cfg build/top.bit
-```
 
-Then drag `build/top.bit` onto the iCELink USB drive that appears when the board is plugged in.
+## Sprites
+
+python tools/png_to_mem.py assets/yourfile.png rtl/sprite.mem
+python tools/png_to_mem.py assets/bg.png rtl/bg.mem --bg 120x68
 
 
-## Swapping sprites
-
-1. Put a PNG in `assets/`. Make the background pure magenta `(255, 0, 255)` — those pixels become transparent on screen.
-2. Convert it: `python tools/png_to_mem.py assets/yourfile.png rtl/sprite.mem`
-3. Rebuild and flash (same one-liner above).
-
-The script auto-crops to the non-magenta content and resizes to 64×64. First-time setup: `pip install pillow`.
-
----
 
 ## Tweaking behavior
 
