@@ -45,7 +45,12 @@ module top (
     // when the button is pressed (button connects pin to GND).
     input  wire        BTN_L,
     input  wire        BTN_R,
-    input  wire        BTN_J
+    input  wire        BTN_J,
+
+    // Opponent buttons (E1=left, C2=right, B2=jump)
+    input  wire        BTN_OL,
+    input  wire        BTN_OR,
+    input  wire        BTN_OJ
 );
 
     // =========================================================================
@@ -134,12 +139,32 @@ module top (
         .pressed   (btn_j_pressed)
     );
 
+    wire btn_ol_pressed, btn_or_pressed;
+    debounce u_db_ol (
+        .pclk      (pclk),
+        .rst_n     (rst_n),
+        .btn_raw_n (BTN_OL),
+        .pressed   (btn_ol_pressed)
+    );
+    debounce u_db_or (
+        .pclk      (pclk),
+        .rst_n     (rst_n),
+        .btn_raw_n (BTN_OR),
+        .pressed   (btn_or_pressed)
+    );
+    debounce u_db_oj (
+        .pclk      (pclk),
+        .rst_n     (rst_n),
+        .btn_raw_n (BTN_OJ),
+        .pressed   (btn_oj_pressed)
+    );
+
     // ---------------- Sprite position ----------------
     localparam [9:0] SPRITE_W  = 10'd64;
     localparam [9:0] SPRITE_H  = 10'd64;
     localparam [9:0] STEP      = 10'd2;         // pixels per frame while held
     localparam [9:0] X_MAX     = 10'd480 - SPRITE_W;
-    localparam [9:0] Y_GROUND  = 10'd104;       // resting Y (272/2 - 64/2)
+    localparam [9:0] Y_GROUND  = 10'd140;       // resting Y (lower half of 272-pixel screen)
 
     // Jump parameters
     // JUMP_RISE + JUMP_FALL frames total arc. JUMP_HEIGHT in pixels.
@@ -165,7 +190,7 @@ module top (
 
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
-            sprite_x    <= 10'd208;
+            sprite_x    <= 10'd80;
             sprite_y    <= Y_GROUND;
             jumping     <= 1'b0;
             jump_cnt    <= 6'd0;
@@ -226,16 +251,78 @@ module top (
     end
 
     // =========================================================================
-    // 5) SPRITE RENDERER -- "for the pixel at (px, py), is it part of the
-    //    sprite (whose top-left corner is at (sprite_x, Y_FIXED)) and if
-    //    so, what color?"
+    // 5) OPPONENT STATE -- mirrors player logic, driven by BTN_OL/OR/OJ
     // =========================================================================
-    wire       sp_in;     // 1 if the current pixel is inside the (non-transparent) sprite
-    wire [4:0] sp_r;      // sprite color components (RGB565)
+    reg [9:0] opp_x;
+    reg [9:0] opp_y;
+    reg        opp_jumping;
+    reg [5:0]  opp_jump_cnt;
+    reg [3:0]  opp_anim_cnt;
+    reg [1:0]  opp_frame_index;
+    wire opp_moving = btn_ol_pressed ^ btn_or_pressed;
+
+    always @(posedge pclk or negedge rst_n) begin
+        if (!rst_n) begin
+            opp_x           <= 10'd336;
+            opp_y           <= Y_GROUND;
+            opp_jumping     <= 1'b0;
+            opp_jump_cnt    <= 6'd0;
+            opp_anim_cnt    <= ANIM_DIV;
+            opp_frame_index <= 2'd0;
+        end else if (frame_tick) begin
+
+            // --- Horizontal movement ---
+            if (btn_ol_pressed && !btn_or_pressed) begin
+                opp_x <= (opp_x > STEP) ? opp_x - STEP : 10'd0;
+            end else if (btn_or_pressed && !btn_ol_pressed) begin
+                opp_x <= (opp_x < X_MAX - STEP) ? opp_x + STEP : X_MAX;
+            end
+
+            // --- Walk animation ---
+            if (!opp_moving) begin
+                opp_anim_cnt    <= ANIM_DIV;
+                opp_frame_index <= 2'd0;
+            end else if (opp_anim_cnt == ANIM_DIV) begin
+                opp_anim_cnt    <= 4'd0;
+                opp_frame_index <= (opp_frame_index == LAST_FRAME) ? 2'd0
+                                                                    : opp_frame_index + 1'b1;
+            end else begin
+                opp_anim_cnt <= opp_anim_cnt + 1'b1;
+            end
+
+            // --- Jump state machine ---
+            if (!opp_jumping) begin
+                if (!btn_oj_pressed) begin
+                    opp_jumping  <= 1'b1;
+                    opp_jump_cnt <= 6'd0;
+                end
+                opp_y <= Y_GROUND;
+            end else begin
+                opp_jump_cnt <= opp_jump_cnt + 1'b1;
+                if (opp_jump_cnt < JUMP_RISE) begin
+                    opp_y <= Y_GROUND - ((opp_jump_cnt + 1) * JUMP_HEIGHT / JUMP_RISE);
+                end else if (opp_jump_cnt < JUMP_RISE + JUMP_FALL) begin
+                    opp_y <= (Y_GROUND - JUMP_HEIGHT) +
+                             ((opp_jump_cnt - JUMP_RISE + 1) * JUMP_HEIGHT / JUMP_FALL);
+                end else begin
+                    opp_y        <= Y_GROUND;
+                    opp_jumping  <= 1'b0;
+                    opp_jump_cnt <= 6'd0;
+                end
+            end
+        end
+    end
+
+    // =========================================================================
+    // 6) SPRITE RENDERERS -- player (sprite.mem) and opponent (sprite2.mem)
+    // =========================================================================
+    wire       sp_in;
+    wire [4:0] sp_r;
     wire [5:0] sp_g;
     wire [4:0] sp_b;
 
     sprite_renderer #(
+        .MEM_FILE   ("rtl/sprite.mem"),
         .W          (SPRITE_W),
         .H          (SPRITE_H),
         .NUM_FRAMES (4),
@@ -253,9 +340,32 @@ module top (
         .b           (sp_b)
     );
 
+    wire       opp_in;
+    wire [4:0] opp_r;
+    wire [5:0] opp_g;
+    wire [4:0] opp_b;
+
+    sprite_renderer #(
+        .MEM_FILE   ("rtl/sprite2.mem"),
+        .W          (SPRITE_W),
+        .H          (SPRITE_H),
+        .NUM_FRAMES (4),
+        .FRAME_BITS (2)
+    ) u_opp (
+        .pclk        (pclk),
+        .px          (px),
+        .py          (py),
+        .sprite_x    (opp_x),
+        .sprite_y    (opp_y),
+        .frame_index (opp_frame_index),
+        .in_sprite   (opp_in),
+        .r           (opp_r),
+        .g           (opp_g),
+        .b           (opp_b)
+    );
+
     // =========================================================================
-    // 6) PIXEL MUX -- pick between sprite color and background color, then
-    //    drive the LCD output pins.
+    // 7) PIXEL MUX -- player > opponent > background priority
     // =========================================================================
 
     // The sprite_renderer has 1 cycle of internal delay (it reads its ROM
@@ -283,12 +393,14 @@ module top (
         den_out <= den_d & rst_n;
 
         if (sp_in) begin
-            // Inside the sprite (and not on a transparent pixel) -> sprite color
             r_out <= sp_r;
             g_out <= sp_g;
             b_out <= sp_b;
+        end else if (opp_in) begin
+            r_out <= opp_r;
+            g_out <= opp_g;
+            b_out <= opp_b;
         end else begin
-            // Outside (or transparent) -> background color shows through
             r_out <= BG_R;
             g_out <= BG_G;
             b_out <= BG_B;

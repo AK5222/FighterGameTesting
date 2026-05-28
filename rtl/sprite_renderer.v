@@ -37,6 +37,7 @@
 // =============================================================================
 
 module sprite_renderer #(
+    parameter        MEM_FILE          = "rtl/sprite.mem",
     parameter [9:0]  W                 = 10'd64,   // sprite width
     parameter [9:0]  H                 = 10'd64,   // sprite height
     parameter        NUM_FRAMES        = 4,        // number of animation frames in ROM
@@ -59,7 +60,7 @@ module sprite_renderer #(
     // Frames are laid out one after another: frame 0 at addrs [0..4095],
     // frame 1 at [4096..8191], etc. png_to_mem.py concatenates them in order.
     reg [15:0] mem [0:NUM_FRAMES*4096 - 1];
-    initial $readmemh("rtl/sprite.mem", mem);
+    initial $readmemh(MEM_FILE, mem);
 
     // ----- Bounding box test (in screen coordinates) -----
     wire inside_bbox = (px >= sprite_x) && (px < sprite_x + W) &&
