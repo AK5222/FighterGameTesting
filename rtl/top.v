@@ -120,7 +120,7 @@ module top (
 
             // --- Jump state machine ---
             if (!jumping) begin
-                if (btn_j_pressed) begin
+                if (!btn_j_pressed) begin
                     jumping  <= 1'b1;
                     jump_cnt <= 6'd0;
                 end
