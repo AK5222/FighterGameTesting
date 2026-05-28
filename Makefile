@@ -19,6 +19,7 @@ TOP      := top                                      # top-level Verilog module
 SRC      := rtl/pll.v \
             rtl/lcd_timing.v \
             rtl/sprite_renderer.v \
+            rtl/bg_renderer.v \
             rtl/debounce.v \
             rtl/top.v
 LPF      := top.lpf                                  # pin assignments
