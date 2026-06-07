@@ -33,79 +33,50 @@
 // - Opponent has the same 4 buttons on E1/C2/B2/A2.
 
 module top (
-    input  wire        CLK,        // 25 MHz crystal from the FPGA board
-
-    // LCD outputs (DE-only mode -- no HSYNC/VSYNC pins, panel uses DEN flag)
-    output wire        LCD_CLK,    // pixel clock to the panel
-    output wire        LCD_DEN,    // "data enable" -- 1 when a real pixel is being sent
-    output wire [4:0]  LCD_R,      // red   (5 bits = 32 levels)
-    output wire [5:0]  LCD_G,      // green (6 bits = 64 levels)
-    output wire [4:0]  LCD_B,      // blue  (5 bits = 32 levels)
-                                   // Together: RGB565 = 16-bit color, 65k colors
-
-    // Two breadboard buttons. Active-LOW: the pin sits at 3.3V when not pressed
-    // (due to internal pull-up resistor enabled in top.lpf), and goes to 0V
-    // when the button is pressed (button connects pin to GND).
-    input  wire        BTN_L,
-    input  wire        BTN_R,
-    input  wire        BTN_J,
-    input  wire        BTN_A,         // A5: player attack
-
-    // Opponent buttons (E1=left, C2=right, B2=jump, A2=attack)
-    input  wire        BTN_OL,
-    input  wire        BTN_OR,
-    input  wire        BTN_OJ,
-    input  wire        BTN_OA
+    input  wire        CLK,
+ 
+    output wire        LCD_CLK,
+    output wire        LCD_DEN,
+    output wire [4:0]  LCD_R,
+    output wire [5:0]  LCD_G,
+    output wire [4:0]  LCD_B,
+ 
+    input  wire        UART_RX
 );
-
+ 
     // =========================================================================
     // 1) CLOCKING + RESET
-    //    The LCD needs ~9 MHz pixel clock. The board only gives us 25 MHz.
-    //    A PLL (Phase-Locked Loop) is a circuit that takes one clock and
-    //    multiplies/divides it to produce another. See rtl/pll.v.
     // =========================================================================
-    wire pclk;          // the new 9 MHz pixel clock
-    wire pll_locked;    // 1 once the PLL has stabilized
-
+    wire pclk;
+    wire pll_locked;
+ 
     pll u_pll (
         .clkin   (CLK),
         .clkout0 (pclk),
         .locked  (pll_locked)
     );
-
-    // Hold the rest of the design in reset for ~256 pclk cycles AFTER the PLL
-    // locks. Reason: the PLL output is unstable for a brief moment when it
-    // first locks, and we don't want the LCD to receive garbage during that
-    // window. While rst_n=0, the LCD's DEN line is forced low, so the panel
-    // ignores everything.
+ 
     reg [7:0] rst_cnt = 8'd0;
-    reg       rst_n   = 1'b0;     // active-LOW reset (1 = running, 0 = reset)
+    reg       rst_n   = 1'b0;
     always @(posedge pclk or negedge pll_locked) begin
         if (!pll_locked) begin
-            // PLL not locked yet -> hold reset, clear counter
             rst_cnt <= 8'd0;
             rst_n   <= 1'b0;
         end else if (rst_cnt != 8'hFF) begin
-            // PLL is locked but we haven't waited long enough yet
             rst_cnt <= rst_cnt + 1'b1;
             rst_n   <= 1'b0;
         end else begin
-            // Counter saturated -> safe to release reset
             rst_n <= 1'b1;
         end
     end
-
+ 
     // =========================================================================
-    // 2) LCD TIMING -- scans across all pixels of the screen
-    //    Produces:
-    //      px, py     = which pixel is being drawn right now (0..479, 0..271)
-    //      den        = 1 when we're inside the visible 480x272 area
-    //      frame_tick = pulses once per full screen redraw (~55 times per sec)
+    // 2) LCD TIMING
     // =========================================================================
     wire [9:0] px, py;
     wire       den;
     wire       frame_tick;
-
+ 
     lcd_timing u_timing (
         .pclk       (pclk),
         .rst_n      (rst_n),
@@ -114,110 +85,70 @@ module top (
         .den        (den),
         .frame_tick (frame_tick)
     );
-
+ 
     // =========================================================================
-    // 3) BUTTONS -- debounce both physical buttons
-    //    Mechanical buttons "bounce" when pressed -- the contacts chatter for
-    //    a few milliseconds, producing dozens of fake on/off events. The
-    //    debouncer filters that out so we see one clean "pressed" signal.
+    // 3) UART INPUT
     // =========================================================================
-    wire btn_l_pressed, btn_r_pressed;
-
-    debounce u_db_l (
-        .pclk      (pclk),
-        .rst_n     (rst_n),
-        .btn_raw_n (BTN_L),         // raw, active-low from the pin
-        .pressed   (btn_l_pressed)  // clean, active-high
+    wire p1_left, p1_right, p1_jump, p1_block, p1_atk1, p1_atk2;
+    wire p2_left, p2_right, p2_jump, p2_block, p2_atk1, p2_atk2;
+ 
+    uart_input u_uart (
+        .pclk       (pclk),
+        .rst_n      (rst_n),
+        .rx         (UART_RX),
+        .frame_tick (frame_tick),
+        .p1_left    (p1_left),  .p1_right (p1_right),
+        .p1_jump    (p1_jump),  .p1_block (p1_block),
+        .p1_atk1    (p1_atk1),  .p1_atk2  (p1_atk2),
+        .p2_left    (p2_left),  .p2_right (p2_right),
+        .p2_jump    (p2_jump),  .p2_block (p2_block),
+        .p2_atk1    (p2_atk1),  .p2_atk2  (p2_atk2)
     );
-
-    debounce u_db_r (
-        .pclk      (pclk),
-        .rst_n     (rst_n),
-        .btn_raw_n (BTN_R),
-        .pressed   (btn_r_pressed)
-    );
-
-    debounce u_db_j (
-        .pclk      (pclk),
-        .rst_n     (rst_n),
-        .btn_raw_n (BTN_J),
-        .pressed   (btn_j_pressed)
-    );
-
-    wire btn_a_pressed;
-    debounce u_db_a (
-        .pclk      (pclk),
-        .rst_n     (rst_n),
-        .btn_raw_n (BTN_A),
-        .pressed   (btn_a_pressed)
-    );
-
-    wire btn_ol_pressed, btn_or_pressed;
-    debounce u_db_ol (
-        .pclk      (pclk),
-        .rst_n     (rst_n),
-        .btn_raw_n (BTN_OL),
-        .pressed   (btn_ol_pressed)
-    );
-    debounce u_db_or (
-        .pclk      (pclk),
-        .rst_n     (rst_n),
-        .btn_raw_n (BTN_OR),
-        .pressed   (btn_or_pressed)
-    );
-    debounce u_db_oj (
-        .pclk      (pclk),
-        .rst_n     (rst_n),
-        .btn_raw_n (BTN_OJ),
-        .pressed   (btn_oj_pressed)
-    );
-    wire btn_oa_pressed;
-    debounce u_db_oa (
-        .pclk      (pclk),
-        .rst_n     (rst_n),
-        .btn_raw_n (BTN_OA),
-        .pressed   (btn_oa_pressed)
-    );
-
-    // ---------------- Sprite position ----------------
+ 
+    wire btn_l_pressed   = p1_left;
+    wire btn_r_pressed   = p1_right;
+    wire btn_j_pressed   = p1_jump;
+    wire btn_a_pressed   = p1_atk1;
+    wire btn_a2_pressed  = p1_atk2;
+    wire btn_block       = p1_block;
+ 
+    wire btn_ol_pressed  = p2_left;
+    wire btn_or_pressed  = p2_right;
+    wire btn_oj_pressed  = p2_jump;
+    wire btn_oa_pressed  = p2_atk1;
+    wire btn_oa2_pressed = p2_atk2;
+    wire btn_oblock      = p2_block;
+ 
+    // =========================================================================
+    // 4) SPRITE POSITION + GAME LOGIC
+    // =========================================================================
     localparam [9:0] SPRITE_W  = 10'd64;
     localparam [9:0] SPRITE_H  = 10'd64;
-    localparam [9:0] STEP      = 10'd2;         // pixels per frame while held
+    localparam [9:0] STEP      = 10'd2;
     localparam [9:0] X_MAX     = 10'd480 - SPRITE_W;
-    localparam [9:0] Y_GROUND  = 10'd124;       // sprite bottom lands on grass line (screen y=188)
-
-    // Jump parameters
-    // JUMP_RISE + JUMP_FALL frames total arc. JUMP_HEIGHT in pixels.
-    localparam [5:0] JUMP_RISE   = 6'd20;       // frames going up
-    localparam [5:0] JUMP_FALL   = 6'd20;       // frames coming down
-    localparam [9:0] JUMP_HEIGHT = 10'd80;      // max pixels above ground
-
-    // Attack parameters
-    localparam [5:0] ATTACK_WINDUP_TICKS = 6'd10;   // ~0.18 s of windup pose (frame 4)
-    localparam [5:0] ATTACK_SWING_TICKS  = 6'd10;   // ~0.18 s of swing pose  (frame 5)
-    localparam [9:0] HIT_DAMAGE          = 10'd10;  // HP lost per landed hit
-
-    // Hitbox inset: shrink the overlap test by this many pixels on each side
-    // of the sprite, so only the character's body (not the transparent
-    // padding around it) counts as a hit. Effective hitbox width is
-    // SPRITE_W - 2*HITBOX_INSET_X. Smaller value = wider hitbox (easier
-    // hits); larger value = tighter hitbox (must be closer to connect).
-    localparam [9:0] HITBOX_INSET_X = 10'd12;       // 64 - 2*16 = 32 px effective width
-    localparam [9:0] HITBOX_INSET_Y = 10'd0;        // vertical untouched for now
-
-    // ---- HUD: health bars (drawn procedurally, no BRAM cost) ----
-    localparam [9:0] BAR_W   = 10'd144;          // bar width = max HP, 1 pixel per HP
+    localparam [9:0] Y_GROUND  = 10'd124;
+ 
+    localparam [5:0] JUMP_RISE   = 6'd20;
+    localparam [5:0] JUMP_FALL   = 6'd20;
+    localparam [9:0] JUMP_HEIGHT = 10'd80;
+ 
+    localparam [5:0] ATTACK_WINDUP_TICKS = 6'd10;
+    localparam [5:0] ATTACK_SWING_TICKS  = 6'd10;
+    localparam [9:0] HIT_DAMAGE          = 10'd10;
+ 
+    localparam [9:0] HITBOX_INSET_X = 10'd12;
+    localparam [9:0] HITBOX_INSET_Y = 10'd0;
+ 
+    localparam [9:0] BAR_W   = 10'd144;
     localparam [9:0] BAR_H   = 10'd12;
-    localparam [9:0] P_BAR_X = 10'd8;            // player bar: top-left corner
+    localparam [9:0] P_BAR_X = 10'd8;
     localparam [9:0] P_BAR_Y = 10'd8;
-    localparam [9:0] O_BAR_X = 10'd480 - 10'd8 - BAR_W;  // opponent bar: top-right (= 328)
+    localparam [9:0] O_BAR_X = 10'd480 - 10'd8 - BAR_W;
     localparam [9:0] O_BAR_Y = 10'd8;
-
-    reg [9:0] player_hp;   // 0..BAR_W
+ 
+    reg [9:0] player_hp;
     reg [9:0] opp_hp;
-    // Decrement HP when the OTHER side lands a hit. hit_consumed/opp_hit_consumed
-    // (set inside each attack state machine) guarantee one HP delta per attack
-    // press even if the boxes stay overlapping for the rest of the swing.
+ 
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
             player_hp <= BAR_W;
@@ -229,32 +160,24 @@ module top (
                 opp_hp    <= (opp_hp    > HIT_DAMAGE) ? opp_hp    - HIT_DAMAGE : 10'd0;
         end
     end
-
+ 
     reg [9:0] sprite_x;
     reg [9:0] sprite_y;
-
-    // Jump state machine
     reg        jumping;
-    reg [5:0]  jump_cnt;   // counts frames into the jump
-
-    // Walk-cycle animation: advance frame_index every ANIM_DIV frame_ticks
-    // while a movement button is held. Idle = held at 0 (idle pose).
-    // 6 frames total: 0=idle, 1-3=walk cycle, 4=attack windup, 5=attack swing.
-    // Walk cycle wraps at LAST_FRAME=3; frames 4-5 are only reached via the
-    // attack state machine below.
+    reg [5:0]  jump_cnt;
+ 
     localparam [3:0] ANIM_DIV   = 4'd7;
-    localparam [2:0] LAST_FRAME = 3'd3;   // highest walk-cycle frame index
+    localparam [2:0] LAST_FRAME = 3'd3;
     reg [3:0] anim_cnt;
     reg [2:0] frame_index;
-    wire moving = btn_l_pressed ^ btn_r_pressed;   // exactly one direction held
-
-    // Player attack state machine
+    wire moving = btn_l_pressed ^ btn_r_pressed;
+ 
     reg        attacking;
-    reg        attack_phase;     // 0 = windup (frame 4), 1 = swing (frame 5)
+    reg        attack_phase;
     reg [5:0]  attack_cnt;
-    reg        hit_consumed;     // latches when a hit lands during this swing
-    reg        btn_a_prev;       // sampled at last frame_tick; used for rising-edge detect
-
+    reg        hit_consumed;
+    reg        btn_a_prev;
+ 
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
             sprite_x     <= 10'd80;
@@ -269,26 +192,17 @@ module top (
             hit_consumed <= 1'b0;
             btn_a_prev   <= 1'b0;
         end else if (frame_tick) begin
-
-            // Sample button state at frame_tick rate -- the trigger below uses
-            // (current && !previous) to fire only on the press edge, never
-            // while the button is held.
+ 
             btn_a_prev <= btn_a_pressed;
-
-            // --- Horizontal movement (locked in place while attacking) ---
+ 
             if (!attacking) begin
-                if (btn_l_pressed && !btn_r_pressed) begin
+                if (btn_l_pressed && !btn_r_pressed)
                     sprite_x <= (sprite_x > STEP) ? sprite_x - STEP : 10'd0;
-                end else if (btn_r_pressed && !btn_l_pressed) begin
+                else if (btn_r_pressed && !btn_l_pressed)
                     sprite_x <= (sprite_x < X_MAX - STEP) ? sprite_x + STEP : X_MAX;
-                end
-                // If both or neither held: stay put
             end
-
-            // --- Attack state machine ---
+ 
             if (!attacking) begin
-                // Rising-edge trigger: press the button once = one attack.
-                // Holding it down does NOT auto-repeat.
                 if (btn_a_pressed && !btn_a_prev && !jumping) begin
                     attacking    <= 1'b1;
                     attack_phase <= 1'b0;
@@ -298,51 +212,41 @@ module top (
             end else begin
                 attack_cnt <= attack_cnt + 1'b1;
                 if (attack_phase == 1'b0 && attack_cnt == ATTACK_WINDUP_TICKS - 1) begin
-                    attack_phase <= 1'b1;     // windup -> swing
+                    attack_phase <= 1'b1;
                     attack_cnt   <= 6'd0;
                 end else if (attack_phase == 1'b1 && attack_cnt == ATTACK_SWING_TICKS - 1) begin
-                    attacking <= 1'b0;        // end attack, back to walk/idle
+                    attacking <= 1'b0;
                 end
-                // Latch hit_consumed the first time a hit lands this swing
                 if (player_landing_hit) hit_consumed <= 1'b1;
             end
-
-            // --- Frame index: attack overrides walk cycle ---
+ 
             if (attacking) begin
                 frame_index <= attack_phase ? 3'd5 : 3'd4;
-                anim_cnt    <= ANIM_DIV;       // walk resumes cleanly after attack
+                anim_cnt    <= ANIM_DIV;
             end else if (!moving) begin
-                // Idle: freeze on frame 0. Pre-load divider so first frame_tick
-                // after a movement button is pressed advances straight to frame 1.
                 anim_cnt    <= ANIM_DIV;
                 frame_index <= 3'd0;
             end else if (anim_cnt == ANIM_DIV) begin
                 anim_cnt    <= 4'd0;
-                frame_index <= (frame_index == LAST_FRAME) ? 3'd0
-                                                           : frame_index + 1'b1;
+                frame_index <= (frame_index == LAST_FRAME) ? 3'd0 : frame_index + 1'b1;
             end else begin
                 anim_cnt <= anim_cnt + 1'b1;
             end
-
-            // --- Jump state machine (no new jump while attacking) ---
+ 
             if (!jumping) begin
-                if (!btn_j_pressed && !attacking) begin
+                if (btn_j_pressed && !attacking) begin
                     jumping  <= 1'b1;
                     jump_cnt <= 6'd0;
                 end
                 sprite_y <= Y_GROUND;
             end else begin
                 jump_cnt <= jump_cnt + 1'b1;
-
                 if (jump_cnt < JUMP_RISE) begin
-                    // Rising phase: move up linearly
                     sprite_y <= Y_GROUND - ((jump_cnt + 1) * JUMP_HEIGHT / JUMP_RISE);
                 end else if (jump_cnt < JUMP_RISE + JUMP_FALL) begin
-                    // Falling phase: move back down linearly
                     sprite_y <= (Y_GROUND - JUMP_HEIGHT) +
                                 ((jump_cnt - JUMP_RISE + 1) * JUMP_HEIGHT / JUMP_FALL);
                 end else begin
-                    // Land
                     sprite_y <= Y_GROUND;
                     jumping  <= 1'b0;
                     jump_cnt <= 6'd0;
@@ -350,9 +254,9 @@ module top (
             end
         end
     end
-
+ 
     // =========================================================================
-    // 5) OPPONENT STATE -- mirrors player logic, driven by BTN_OL/OR/OJ/OA
+    // 5) OPPONENT STATE
     // =========================================================================
     reg [9:0] opp_x;
     reg [9:0] opp_y;
@@ -361,14 +265,13 @@ module top (
     reg [3:0]  opp_anim_cnt;
     reg [2:0]  opp_frame_index;
     wire opp_moving = btn_ol_pressed ^ btn_or_pressed;
-
-    // Opponent attack state machine
+ 
     reg        opp_attacking;
     reg        opp_attack_phase;
     reg [5:0]  opp_attack_cnt;
     reg        opp_hit_consumed;
-    reg        btn_oa_prev;      // rising-edge detect on opponent attack button
-
+    reg        btn_oa_prev;
+ 
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
             opp_x            <= 10'd336;
@@ -383,19 +286,16 @@ module top (
             opp_hit_consumed <= 1'b0;
             btn_oa_prev      <= 1'b0;
         end else if (frame_tick) begin
-
-            btn_oa_prev <= btn_oa_pressed;   // for rising-edge detect
-
-            // --- Horizontal movement (locked while attacking) ---
+ 
+            btn_oa_prev <= btn_oa_pressed;
+ 
             if (!opp_attacking) begin
-                if (btn_ol_pressed && !btn_or_pressed) begin
+                if (btn_ol_pressed && !btn_or_pressed)
                     opp_x <= (opp_x > STEP) ? opp_x - STEP : 10'd0;
-                end else if (btn_or_pressed && !btn_ol_pressed) begin
+                else if (btn_or_pressed && !btn_ol_pressed)
                     opp_x <= (opp_x < X_MAX - STEP) ? opp_x + STEP : X_MAX;
-                end
             end
-
-            // --- Attack state machine ---
+ 
             if (!opp_attacking) begin
                 if (btn_oa_pressed && !btn_oa_prev && !opp_jumping) begin
                     opp_attacking    <= 1'b1;
@@ -413,8 +313,7 @@ module top (
                 end
                 if (opp_landing_hit) opp_hit_consumed <= 1'b1;
             end
-
-            // --- Frame index: attack overrides walk cycle ---
+ 
             if (opp_attacking) begin
                 opp_frame_index <= opp_attack_phase ? 3'd5 : 3'd4;
                 opp_anim_cnt    <= ANIM_DIV;
@@ -423,15 +322,13 @@ module top (
                 opp_frame_index <= 3'd0;
             end else if (opp_anim_cnt == ANIM_DIV) begin
                 opp_anim_cnt    <= 4'd0;
-                opp_frame_index <= (opp_frame_index == LAST_FRAME) ? 3'd0
-                                                                   : opp_frame_index + 1'b1;
+                opp_frame_index <= (opp_frame_index == LAST_FRAME) ? 3'd0 : opp_frame_index + 1'b1;
             end else begin
                 opp_anim_cnt <= opp_anim_cnt + 1'b1;
             end
-
-            // --- Jump state machine (no new jump while attacking) ---
+ 
             if (!opp_jumping) begin
-                if (!btn_oj_pressed && !opp_attacking) begin
+                if (btn_oj_pressed && !opp_attacking) begin
                     opp_jumping  <= 1'b1;
                     opp_jump_cnt <= 6'd0;
                 end
@@ -451,14 +348,10 @@ module top (
             end
         end
     end
-
+ 
     // =========================================================================
-    // 6) HIT DETECTION -- bounding-box overlap + landing-hit flags
+    // 6) HIT DETECTION
     // =========================================================================
-    // Effective hitbox edges (inset from the full sprite by HITBOX_INSET_*).
-    // Each character's hitbox is a rectangle centered inside their 64x64
-    // sprite, narrower than the sprite art so the transparent padding
-    // around the knight doesn't count as a hit.
     wire [9:0] p_left   = sprite_x + HITBOX_INSET_X;
     wire [9:0] p_right  = sprite_x + SPRITE_W - HITBOX_INSET_X;
     wire [9:0] p_top    = sprite_y + HITBOX_INSET_Y;
@@ -467,24 +360,48 @@ module top (
     wire [9:0] o_right  = opp_x    + SPRITE_W - HITBOX_INSET_X;
     wire [9:0] o_top    = opp_y    + HITBOX_INSET_Y;
     wire [9:0] o_bottom = opp_y    + SPRITE_H - HITBOX_INSET_Y;
-
-    // Hitboxes overlap if both X and Y ranges overlap.
+ 
     wire boxes_overlap = (p_left < o_right) && (p_right > o_left)
                       && (p_top  < o_bottom) && (p_bottom > o_top);
-
-    // "Landing a hit" = attacker is in the swing phase, boxes overlap, and
-    // we haven't already taken HP off the defender this attack.
+ 
     wire player_landing_hit = attacking     && attack_phase     && boxes_overlap && !hit_consumed;
     wire opp_landing_hit    = opp_attacking && opp_attack_phase && boxes_overlap && !opp_hit_consumed;
-
+ 
     // =========================================================================
-    // 7) SPRITE RENDERERS -- player (sprite.mem) and opponent (sprite2.mem)
+    // 7) DRAW BUFFERS -- latch positions at frame start to prevent mid-frame
+    //    updates causing screen corruption when sprite moves
+    // =========================================================================
+    reg [9:0] sprite_x_draw, sprite_y_draw;
+    reg [2:0] frame_index_draw;
+    reg [9:0] opp_x_draw, opp_y_draw;
+    reg [2:0] opp_frame_index_draw;
+ 
+    always @(posedge pclk or negedge rst_n) begin
+        if (!rst_n) begin
+            sprite_x_draw       <= 10'd80;
+            sprite_y_draw       <= Y_GROUND;
+            frame_index_draw    <= 3'd0;
+            opp_x_draw          <= 10'd336;
+            opp_y_draw          <= Y_GROUND;
+            opp_frame_index_draw <= 3'd0;
+        end else if (frame_tick) begin
+            sprite_x_draw       <= sprite_x;
+            sprite_y_draw       <= sprite_y;
+            frame_index_draw    <= frame_index;
+            opp_x_draw          <= opp_x;
+            opp_y_draw          <= opp_y;
+            opp_frame_index_draw <= opp_frame_index;
+        end
+    end
+ 
+    // =========================================================================
+    // 8) SPRITE RENDERERS
     // =========================================================================
     wire       sp_in;
     wire [4:0] sp_r;
     wire [5:0] sp_g;
     wire [4:0] sp_b;
-
+ 
     sprite_renderer #(
         .MEM_FILE   ("rtl/sprite.mem"),
         .W          (SPRITE_W),
@@ -495,20 +412,20 @@ module top (
         .pclk        (pclk),
         .px          (px),
         .py          (py),
-        .sprite_x    (sprite_x),
-        .sprite_y    (sprite_y),
-        .frame_index (frame_index),
+        .sprite_x    (sprite_x_draw),
+        .sprite_y    (sprite_y_draw),
+        .frame_index (frame_index_draw),
         .in_sprite   (sp_in),
         .r           (sp_r),
         .g           (sp_g),
         .b           (sp_b)
     );
-
+ 
     wire       opp_in;
     wire [4:0] opp_r;
     wire [5:0] opp_g;
     wire [4:0] opp_b;
-
+ 
     sprite_renderer #(
         .MEM_FILE   ("rtl/sprite2.mem"),
         .W          (SPRITE_W),
@@ -519,16 +436,15 @@ module top (
         .pclk        (pclk),
         .px          (px),
         .py          (py),
-        .sprite_x    (opp_x),
-        .sprite_y    (opp_y),
-        .frame_index (opp_frame_index),
+        .sprite_x    (opp_x_draw),
+        .sprite_y    (opp_y_draw),
+        .frame_index (opp_frame_index_draw),
         .in_sprite   (opp_in),
         .r           (opp_r),
         .g           (opp_g),
         .b           (opp_b)
     );
-
-    // ---- Background renderer (240x136 pixel-doubled to 480x272) ----
+ 
     wire [4:0] bg_r;
     wire [5:0] bg_g;
     wire [4:0] bg_b;
@@ -540,27 +456,23 @@ module top (
         .g    (bg_g),
         .b    (bg_b)
     );
-
+ 
     // =========================================================================
-    // 8) HUD -- procedurally-drawn health bars (top-left + top-right corners)
+    // 9) HUD
     // =========================================================================
-    // Bounding box + fill tests (combinational on px/py).
     wire in_p_bar = (px >= P_BAR_X) && (px < P_BAR_X + BAR_W)
                  && (py >= P_BAR_Y) && (py < P_BAR_Y + BAR_H);
     wire in_o_bar = (px >= O_BAR_X) && (px < O_BAR_X + BAR_W)
                  && (py >= O_BAR_Y) && (py < O_BAR_Y + BAR_H);
-
-    // 1-pixel white border around each bar
+ 
     wire p_border = in_p_bar && (px == P_BAR_X || px == P_BAR_X + BAR_W - 1
                               || py == P_BAR_Y || py == P_BAR_Y + BAR_H - 1);
     wire o_border = in_o_bar && (px == O_BAR_X || px == O_BAR_X + BAR_W - 1
                               || py == O_BAR_Y || py == O_BAR_Y + BAR_H - 1);
-
-    // Filled portion: player fills left-to-right, opponent fills right-to-left
+ 
     wire p_filled = (px - P_BAR_X) < player_hp;
     wire o_filled = (px - O_BAR_X) >= (BAR_W - opp_hp);
-
-    // Register flags 1 cycle to align with sprite/bg renderers' BRAM latency.
+ 
     reg in_p_bar_q, in_o_bar_q, p_border_q, o_border_q, p_filled_q, o_filled_q;
     always @(posedge pclk) begin
         in_p_bar_q <= in_p_bar;
@@ -570,38 +482,29 @@ module top (
         p_filled_q <= p_filled;
         o_filled_q <= o_filled;
     end
-
-    // HUD colors (RGB565 component widths)
+ 
     localparam [4:0] BORDER_R   = 5'd31, HP_FILL_R  = 5'd0,  HP_EMPTY_R = 5'd5;
     localparam [5:0] BORDER_G   = 6'd63, HP_FILL_G  = 6'd56, HP_EMPTY_G = 6'd5;
     localparam [4:0] BORDER_B   = 5'd31, HP_FILL_B  = 5'd0,  HP_EMPTY_B = 5'd5;
-
+ 
     // =========================================================================
-    // 9) PIXEL MUX -- HUD > player > opponent > background priority
+    // 10) PIXEL MUX
     // =========================================================================
-
-    // The sprite_renderer has 1 cycle of internal delay (it reads its ROM
-    // synchronously). To keep den lined up with the sprite's RGB output, we
-    // delay den by one cycle too. Otherwise the right edge of the sprite
-    // would smear by one pixel.
     reg den_d;
     always @(posedge pclk) begin
         den_d <= den;
     end
-
+ 
     reg [4:0] r_out;
     reg [5:0] g_out;
     reg [4:0] b_out;
     reg       den_out;
-
+ 
     always @(posedge pclk) begin
-        // While reset is asserted, force DEN low so the panel ignores us.
         den_out <= den_d & rst_n;
-
+ 
         if (p_border_q || o_border_q) begin
-            r_out <= BORDER_R;
-            g_out <= BORDER_G;
-            b_out <= BORDER_B;
+            r_out <= BORDER_R; g_out <= BORDER_G; b_out <= BORDER_B;
         end else if (in_p_bar_q) begin
             r_out <= p_filled_q ? HP_FILL_R : HP_EMPTY_R;
             g_out <= p_filled_q ? HP_FILL_G : HP_EMPTY_G;
@@ -611,29 +514,18 @@ module top (
             g_out <= o_filled_q ? HP_FILL_G : HP_EMPTY_G;
             b_out <= o_filled_q ? HP_FILL_B : HP_EMPTY_B;
         end else if (sp_in) begin
-            r_out <= sp_r;
-            g_out <= sp_g;
-            b_out <= sp_b;
+            r_out <= sp_r; g_out <= sp_g; b_out <= sp_b;
         end else if (opp_in) begin
-            r_out <= opp_r;
-            g_out <= opp_g;
-            b_out <= opp_b;
+            r_out <= opp_r; g_out <= opp_g; b_out <= opp_b;
         end else begin
-            r_out <= bg_r;
-            g_out <= bg_g;
-            b_out <= bg_b;
+            r_out <= bg_r; g_out <= bg_g; b_out <= bg_b;
         end
     end
-
+ 
     assign LCD_R   = r_out;
     assign LCD_G   = g_out;
     assign LCD_B   = b_out;
     assign LCD_DEN = den_out;
-
-    // The LCD wants its pixel clock 180 degrees out of phase with the data
-    // (it latches on the rising edge, so we want data stable then -- which
-    // means transitioning data on the falling edge of pclk). Inverting pclk
-    // here achieves that. If colors look smeared, try removing the "~".
     assign LCD_CLK = ~pclk;
-
+ 
 endmodule

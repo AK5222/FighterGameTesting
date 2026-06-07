@@ -21,6 +21,8 @@ SRC      := rtl/pll.v \
             rtl/sprite_renderer.v \
             rtl/bg_renderer.v \
             rtl/debounce.v \
+			rtl/uart_rx.v \
+            rtl/uart_input.v \
             rtl/top.v
 LPF      := top.lpf                                  # pin assignments
 
