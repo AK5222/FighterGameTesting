@@ -1,7 +1,4 @@
-// =============================================================================
-// top.v -- TEMPORARY MENU TEST VERSION
-// Displays rtl/menu.mem on the 480x272 LCD using menu_renderer.
-// =============================================================================
+// temporary top.v test if the lcd displays the menu
 
 module top (
     input  wire        CLK,
