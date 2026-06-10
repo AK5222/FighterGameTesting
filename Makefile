@@ -21,6 +21,7 @@ SRC      := rtl/pll.v \
             rtl/sprite_renderer.v \
             rtl/bg_renderer.v \
 			rtl/menu_renderer.v \
+			rtl/menu3_renderer.v \
             rtl/debounce.v \
 			rtl/uart_rx.v \
             rtl/uart_input.v \
